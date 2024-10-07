@@ -53,7 +53,11 @@
 
 use crate::types::SolidityAddress;
 use alloy::primitives::Address;
+use alloy::providers::{Provider, ProviderBuilder, WsConnect};
+use alloy::rpc::types::Filter;
 use serde::{Deserialize, Serialize};
+use eyre::Result;
+use futures::StreamExt;
 
 #[derive(Debug)]
 pub struct Packet {
@@ -135,9 +139,44 @@ impl PacketSent {
     }
 }
 
-trait AbstractExecutor {
-    //! Listen current network for LayerZero-specific events and handles them.
-    fn listen(&self);
+pub(crate) struct ListenerContext {}
 
-    fn idempotency_check(&self);
+pub struct Executor {
+    pub(crate) url: String,
+    pub(crate) filter: Filter,
+}
+
+impl Executor {
+    pub fn new(url: &str, filter: Filter, ) -> Self {
+        Executor {  url: String::from(url), filter }
+    }
+
+    pub async fn listen<T>(&self, deserializer: fn(&[u8]) -> T) -> Result<()> {
+        let ws = WsConnect::new(&self.url);
+        let provider = ProviderBuilder::new().on_ws(ws).await?;
+
+        let sub = provider.subscribe_logs(&self.filter).await?;
+        let mut stream = sub.into_stream();
+
+        while let Some(log) = stream.next().await {
+            match Packet::deserialize(log.data().data.iter().as_slice()) {
+                Some(packet) => {
+                    match deserializer(packet.message()) {
+                        Some(packet_sent) => {
+                            println!("PacketSent: {:?}", packet_sent);
+                        }
+                        None => {
+                            println!("Not a PacketSent :(");
+                        }
+                    }
+                }
+                None => {
+                    // TODO: fire a warn/info to a normal logger.
+                    println!("Expected Packet, but got other blob. Fail.");
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
