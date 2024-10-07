@@ -3,15 +3,6 @@ use serde::{Deserialize, Serialize};
 
 pub type SolidityAddress = [u8; 20];
 
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct PacketSent {
-//     #[serde(rename = "encodedPacket")]
-//     pub(crate) encoded_packet: Vec<u8>,
-//     pub(crate) options: Vec<u8>,
-//     #[serde(rename = "sendLibrary")]
-//     pub(crate) send_library: SolidityAddress,
-// }
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutorPeeFaid {
     executor: SolidityAddress,
