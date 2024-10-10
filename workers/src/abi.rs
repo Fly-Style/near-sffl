@@ -28,3 +28,11 @@ sol!(
     L0V2EndpointAbi,
     "abi/ArbitrumL0V2Endpoint.json"
 );
+
+sol!(
+    #[allow(missing_docs)]
+    #[sol(rpc)]
+    #[derive(Debug, Serialize, Deserialize)]
+    L0V2EndpointViewAbi,
+    "abi/EndpointV2View.json"
+);
