@@ -95,16 +95,20 @@ impl DVNConfig {
 }
 
 /// Useful events for the DVN workflow.
-pub enum DVNEvent {
+pub enum LayerZeroEvent {
     PacketSent,
-    FeePaid,
+    DVNFeePaid,
+    ExecutorPaid,
+    PayloadVerified,
 }
 
-impl AsRef<str> for DVNEvent {
+impl AsRef<str> for LayerZeroEvent {
     fn as_ref(&self) -> &str {
         match self {
-            DVNEvent::PacketSent => "PacketSent(bytes,bytes,address)",
-            DVNEvent::FeePaid => "DVNFeePaid(address[],address[],uint256[])",
+            LayerZeroEvent::PacketSent => "PacketSent(bytes,bytes,address)",
+            LayerZeroEvent::DVNFeePaid => "DVNFeePaid(address[],address[],uint256[])",
+            LayerZeroEvent::ExecutorPaid => "ExecutorFeePaid(address,uint256)",
+            LayerZeroEvent::PayloadVerified => "DVNFeePaid(address,bytes,uint256,bytes32)",
         }
     }
 }
