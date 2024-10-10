@@ -2,7 +2,7 @@
 
 use crate::{
     chain::HttpProvider,
-    config::{DVNConfig, DVNEvent},
+    config::{DVNConfig, LayerZeroEvent},
 };
 use alloy::{
     eips::BlockNumberOrTag,
@@ -29,13 +29,13 @@ pub async fn build_subscriptions(
     // layerzero endpoint filter
     let packet_filter = Filter::new()
         .address(config.l0_addr()?)
-        .event(DVNEvent::PacketSent.as_ref())
+        .event(LayerZeroEvent::PacketSent.as_ref())
         .from_block(BlockNumberOrTag::Latest);
 
     // messagelib endpoint filter
     let fee_paid_filter = Filter::new()
         .address(config.sendlib_uln302_addr()?)
-        .event(DVNEvent::FeePaid.as_ref())
+        .event(LayerZeroEvent::FeePaid.as_ref())
         .from_block(BlockNumberOrTag::Latest);
 
     // Subscribe to logs
@@ -47,6 +47,41 @@ pub async fn build_subscriptions(
     let sendlib_stream = sendlib_sub.into_stream();
 
     Ok((provider, endpoint_stream, sendlib_stream))
+}
+
+pub async fn build_executor_subscriptions(
+    config: &DVNConfig,
+) -> Result<(
+    SubscriptionStream<Log>,
+    SubscriptionStream<Log>,
+    SubscriptionStream<Log>,
+)> {
+    // Create the provider
+    let rpc_url = config.ws_rpc();
+    let ws = WsConnect::new(rpc_url);
+    let provider = ProviderBuilder::new().on_ws(ws).await?;
+
+    // PacketSent
+    let packet_sent_filter = Filter::new()
+        .address(config.l0_addr()?)
+        .event(LayerZeroEvent::PacketSent.as_ref())
+        .from_block(BlockNumberOrTag::Latest);
+
+    let executor_fee_paid = Filter::new()
+        .address(config.receivelib_uln302_addr()?)
+        .event(LayerZeroEvent::ExecutorFeePaid.as_ref())
+        .from_block(BlockNumberOrTag::Latest);
+
+    let packet_verified_filter = Filter::new()
+        .address(config.receivelib_uln302_addr()?)
+        .event(LayerZeroEvent::PacketVerified.as_ref())
+        .from_block(BlockNumberOrTag::Latest);
+
+    Ok((
+        provider.subscribe_logs(&packet_sent_filter).await?.into_stream(),
+        provider.subscribe_logs(&executor_fee_paid).await?.into_stream(),
+        provider.subscribe_logs(&packet_verified_filter).await?.into_stream(),
+    ))
 }
 
 /// Load the MessageLib ABI.

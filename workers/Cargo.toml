@@ -7,6 +7,10 @@ edition = "2021"
 name = "dvn"
 path = "src/bin/dvn.rs"
 
+[[bin]]
+name = "executor"
+path = "src/bin/executor.rs"
+
 [dependencies]
 alloy = { version = "0.4.2", features = ["full"] }
 alloy-json-abi = "0.8.6"
