@@ -140,6 +140,25 @@ fn keccak256(data: &[u8]) -> [u8; 32] {
     result.into()
 }
 
+/// Useful events for the DVN workflow.
+pub enum ExecutionState {
+    NotExecutable,
+    Executable,
+    Executed
+}
+
+impl From<i32> for ExecutionState {
+    fn from(value: i32) -> Self {
+        match value {
+            0 => ExecutionState::NotExecutable,
+            1 => ExecutionState::Executable,
+            2 => ExecutionState::Executed,
+            _ => panic!("Unknown execution state")
+        }
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

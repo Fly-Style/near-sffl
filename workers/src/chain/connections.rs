@@ -35,7 +35,7 @@ pub async fn build_subscriptions(
     // messagelib endpoint filter
     let fee_paid_filter = Filter::new()
         .address(config.sendlib_uln302_addr()?)
-        .event(LayerZeroEvent::FeePaid.as_ref())
+        .event(LayerZeroEvent::DVNFeePaid.as_ref())
         .from_block(BlockNumberOrTag::Latest);
 
     // Subscribe to logs
@@ -68,13 +68,13 @@ pub async fn build_executor_subscriptions(
         .from_block(BlockNumberOrTag::Latest);
 
     let executor_fee_paid = Filter::new()
-        .address(config.receivelib_uln302_addr()?)
+        .address(config.sendlib_uln302_addr()?)
         .event(LayerZeroEvent::ExecutorFeePaid.as_ref())
         .from_block(BlockNumberOrTag::Latest);
 
     let packet_verified_filter = Filter::new()
         .address(config.receivelib_uln302_addr()?)
-        .event(LayerZeroEvent::PacketVerified.as_ref())
+        .event(LayerZeroEvent::PayloadVerified.as_ref())
         .from_block(BlockNumberOrTag::Latest);
 
     Ok((

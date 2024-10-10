@@ -98,7 +98,7 @@ impl DVNConfig {
 pub enum LayerZeroEvent {
     PacketSent,
     DVNFeePaid,
-    ExecutorPaid,
+    ExecutorFeePaid,
     PayloadVerified,
 }
 
@@ -107,7 +107,7 @@ impl AsRef<str> for LayerZeroEvent {
         match self {
             LayerZeroEvent::PacketSent => "PacketSent(bytes,bytes,address)",
             LayerZeroEvent::DVNFeePaid => "DVNFeePaid(address[],address[],uint256[])",
-            LayerZeroEvent::ExecutorPaid => "ExecutorFeePaid(address,uint256)",
+            LayerZeroEvent::ExecutorFeePaid => "ExecutorFeePaid(address,uint256)",
             LayerZeroEvent::PayloadVerified => "DVNFeePaid(address,bytes,uint256,bytes32)",
         }
     }
