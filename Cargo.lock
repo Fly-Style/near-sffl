@@ -443,6 +443,7 @@ dependencies = [
  "alloy-sol-type-parser",
  "alloy-sol-types",
  "const-hex",
+ "derive_more 1.0.0",
  "itoa",
  "serde",
  "serde_json",
@@ -9429,11 +9430,13 @@ name = "workers"
 version = "0.1.0"
 dependencies = [
  "alloy",
+ "alloy-dyn-abi",
  "alloy-json-abi",
  "dotenv",
  "eyre",
  "futures",
  "hex",
+ "log",
  "serde",
  "serde_json",
  "sha3",

@@ -16,7 +16,7 @@ use eyre::{eyre, OptionExt, Result};
 use sha3::{Digest, Keccak256};
 
 /// Create a contract instance from the ABI to interact with on-chain instance.
-pub fn create_contract_instance(config: &DVNConfig, http_provider: HttpProvider, abi: JsonAbi) -> Result<ContractInst> {
+pub fn create_contract_instance(config: &DVNConfig, http_provider: &HttpProvider, abi: JsonAbi) -> Result<ContractInst> {
     let contract: ContractInstance<Http<Client>, _, Ethereum> = ContractInstance::new(
         config.sendlib_uln302_addr()?,
         http_provider.clone(),
