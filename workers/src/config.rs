@@ -26,6 +26,8 @@ pub struct DVNConfig {
     network_id: u64,
     /// Own DVN address. Used to check when the DVN is assigned to a task.
     dvn_addr: String,
+    /// Own public key in the network
+    public_key: String,
 }
 
 impl DVNConfig {
@@ -74,6 +76,10 @@ impl DVNConfig {
         Ok(self.dvn_addr.parse::<Address>()?)
     }
 
+    pub fn public_key(&self) -> Result<Address> {
+        Ok(self.public_key.parse::<Address>()?)
+    }
+
     /// Load environment variables.
     pub fn load_from_env() -> Result<Self> {
         dotenv::dotenv()?;
@@ -90,6 +96,7 @@ impl DVNConfig {
                 .unwrap_or_else(|_| "0".to_string())
                 .parse::<u64>()?,
             dvn_addr: std::env::var("DVN_ADDR").unwrap_or_else(|_| Default::default()),
+            public_key: std::env::var("PUBLIC_KEY").unwrap_or_else(|_| Default::default()),
         })
     }
 }
@@ -108,7 +115,7 @@ impl AsRef<str> for LayerZeroEvent {
             LayerZeroEvent::PacketSent => "PacketSent(bytes,bytes,address)",
             LayerZeroEvent::DVNFeePaid => "DVNFeePaid(address[],address[],uint256[])",
             LayerZeroEvent::ExecutorFeePaid => "ExecutorFeePaid(address,uint256)",
-            LayerZeroEvent::PayloadVerified => "DVNFeePaid(address,bytes,uint256,bytes32)",
+            LayerZeroEvent::PayloadVerified => "PayloadVerified(address,bytes,uint256,bytes32)",
         }
     }
 }

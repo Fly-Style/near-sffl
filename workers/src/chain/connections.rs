@@ -10,8 +10,10 @@ use alloy::{
     pubsub::{PubSubFrontend, SubscriptionStream},
     rpc::types::{Filter, Log},
 };
+use alloy::network::Ethereum;
 use alloy_json_abi::JsonAbi;
 use eyre::Result;
+use tracing::info;
 
 /// Create the subscriptions for the DVN workflow.
 pub async fn build_subscriptions(
@@ -49,18 +51,24 @@ pub async fn build_subscriptions(
     Ok((provider, endpoint_stream, sendlib_stream))
 }
 
+pub async fn build_executor_providers(config: &DVNConfig) -> Result<(
+    RootProvider<PubSubFrontend, Ethereum>, 
+    HttpProvider
+)> {
+    let rpc_url = config.ws_rpc();
+    let ws = WsConnect::new(rpc_url);
+    info!("Connecting to WS endpoint: {:?}", rpc_url);
+    Ok((ProviderBuilder::new().on_ws(ws).await?, get_http_provider(&config)?))
+}
+
 pub async fn build_executor_subscriptions(
     config: &DVNConfig,
+    ws_provider: &RootProvider<PubSubFrontend, Ethereum>
 ) -> Result<(
     SubscriptionStream<Log>,
     SubscriptionStream<Log>,
     SubscriptionStream<Log>,
 )> {
-    // Create the provider
-    let rpc_url = config.ws_rpc();
-    let ws = WsConnect::new(rpc_url);
-    let provider = ProviderBuilder::new().on_ws(ws).await?;
-
     // PacketSent
     let packet_sent_filter = Filter::new()
         .address(config.l0_addr()?)
@@ -71,16 +79,16 @@ pub async fn build_executor_subscriptions(
         .address(config.sendlib_uln302_addr()?)
         .event(LayerZeroEvent::ExecutorFeePaid.as_ref())
         .from_block(BlockNumberOrTag::Latest);
-
+    
     let packet_verified_filter = Filter::new()
         .address(config.receivelib_uln302_addr()?)
         .event(LayerZeroEvent::PayloadVerified.as_ref())
         .from_block(BlockNumberOrTag::Latest);
 
     Ok((
-        provider.subscribe_logs(&packet_sent_filter).await?.into_stream(),
-        provider.subscribe_logs(&executor_fee_paid).await?.into_stream(),
-        provider.subscribe_logs(&packet_verified_filter).await?.into_stream(),
+        ws_provider.subscribe_logs(&packet_sent_filter).await?.into_stream(),
+        ws_provider.subscribe_logs(&executor_fee_paid).await?.into_stream(),
+        ws_provider.subscribe_logs(&packet_verified_filter).await?.into_stream(),
     ))
 }
 

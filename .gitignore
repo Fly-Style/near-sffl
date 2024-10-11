@@ -38,7 +38,7 @@ aggregator.db
 /test_data
 
 # Dotenv files
-.env
+.env.arb-sepolia
 
 # Operator setup keys
 setup/operator/config/keys/bls.json
@@ -49,3 +49,4 @@ setup/plugin/config/keys/ecdsa.json
 # Near DA RPC libs
 libnear_da_rpc_sys.*
 
+.env
