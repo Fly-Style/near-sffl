@@ -81,8 +81,8 @@ pub async fn build_executor_subscriptions(
         .from_block(BlockNumberOrTag::Latest);
     
     let packet_verified_filter = Filter::new()
-        .address(config.receivelib_uln302_addr()?)
-        .event(LayerZeroEvent::PayloadVerified.as_ref())
+        .address(config.l0_addr()?)
+        .event(LayerZeroEvent::PacketVerified.as_ref())
         .from_block(BlockNumberOrTag::Latest);
 
     Ok((

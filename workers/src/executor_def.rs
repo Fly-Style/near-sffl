@@ -1,16 +1,18 @@
-use std::cell::Cell;
 use crate::abi::L0V2EndpointAbi::{Origin, PacketSent, PacketVerified};
-use crate::abi::SendLibraryAbi::{ExecutorFeePaid};
+use crate::abi::SendLibraryAbi::ExecutorFeePaid;
 use crate::chain::{connections, contracts, ContractInst, HttpProvider};
 use crate::config::DVNConfig;
 use alloy::dyn_abi::{DynSolValue, DynSolValue::CustomStruct};
 use alloy::network::Ethereum;
-use alloy::primitives::{keccak256, I256, U256};
+use alloy::primitives::bytes::{Buf, Bytes, BytesMut};
+use alloy::primitives::{keccak256, FixedBytes, I256, U256};
 use alloy::providers::RootProvider;
 use alloy::pubsub::PubSubFrontend;
 use eyre::Result;
 use futures::StreamExt;
+use std::cell::Cell;
 use std::collections::VecDeque;
+use log::info;
 use tokio::time::{sleep, Duration};
 use tracing::{debug, error, warn};
 
@@ -27,15 +29,12 @@ pub enum ExecutorPacketStatusTracker {
     Verified,
 }
 
-pub enum ExecutionStatus {
-    NotExecutable,
-    Executable,
-    Executed,
-}
-
 impl Executor {
     pub fn new(config: DVNConfig) -> Self {
-        Executor { config, finish: Cell::new(false) }
+        Executor {
+            config,
+            finish: Cell::new(false),
+        }
     }
 
     pub fn finish(&self) {
@@ -53,9 +52,9 @@ impl Executor {
             connections::build_executor_subscriptions(&self.config, ws_provider).await?;
 
         let this_address = &self.config.public_key()?;
-        let abi = connections::get_abi_from_path("Users/sasha/dev/near-sffl/workers/abi/EndpointV2View.json")?;
+        let abi = connections::get_abi_from_path("/Users/sasha/dev/near-sffl/workers/abi/ArbitrumL0V2Endpoint.json")?;
         // Create a contract instance.
-        let contract = contracts::create_contract_instance(&self.config, &http_provider, abi)?;
+        let contract = contracts::create_contract_instance(&self.config, http_provider, abi)?;
 
         // Note: we expect to have a single element in this queue. Unfortunately, an author didn't
         // find a good single object holder in Rust (AtomicPtr/RefCell are too complex to handle)
@@ -85,7 +84,7 @@ impl Executor {
                                 packet_sent_queue.clear();
                                 continue;
                             }
-                            warn!("Executor was chosen for execution!");
+                            info!("Executor was chosen for execution!");
                         },
                         Err(e) => { error!("Failed to decode ExecutorFeePaid event: {:?}", e);}
                     }
@@ -131,7 +130,8 @@ impl Executor {
             "executable",
             &[
                 Executor::prepare_header(&packet_verified.origin),
-                DynSolValue::Bytes(keccak256(packet_sent.encodedPayload).to_vec()),
+                DynSolValue::Address(packet_verified.receiver)
+                // DynSolValue::Bytes(keccak256(packet_sent.encodedPayload).to_vec()),
             ],
         )?;
 
@@ -139,24 +139,26 @@ impl Executor {
             let call_result = call_builder.call().await?;
             match call_result[0] {
                 DynSolValue::Int(I256::ZERO, 32) => {
-                    sleep(Duration::from_millis(100)).await;
+                    // NotExecutable, continue to await commits
+                    sleep(Duration::from_millis(500)).await;
                     continue;
                 }
                 DynSolValue::Int(I256::ONE, 32) => {
+                    // Executable
                     Self::lz_receive(contract, packet_verified).await?;
                     break;
                 }
-                // We may ignore any Executed status, it just free the executor.
+                // We may ignore Executed status, it just free the executor.
                 _ => break,
             };
         }
         Ok(())
     }
 
-    /// If the state is Executable, your Executor should decode the packet's options
-    /// using the options.ts package and call the Endpoint's lzReceive function with
+    /// If the state is `Executable`, your `Executor` should decode the packet's options
+    /// using the options.ts package and call the Endpoint's `lzReceive` function with
     /// the packet information:
-    /// endpoint.lzReceive(_origin, _receiver, _guid, _message, _extraData)
+    /// `endpoint.lzReceive(_origin, _receiver, _guid, _message, _extraData)`
     async fn lz_receive(
         contract: &ContractInst,
         packet_verified: &PacketVerified,

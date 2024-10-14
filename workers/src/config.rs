@@ -106,7 +106,7 @@ pub enum LayerZeroEvent {
     PacketSent,
     DVNFeePaid,
     ExecutorFeePaid,
-    PayloadVerified,
+    PacketVerified,
 }
 
 impl AsRef<str> for LayerZeroEvent {
@@ -115,7 +115,7 @@ impl AsRef<str> for LayerZeroEvent {
             LayerZeroEvent::PacketSent => "PacketSent(bytes,bytes,address)",
             LayerZeroEvent::DVNFeePaid => "DVNFeePaid(address[],address[],uint256[])",
             LayerZeroEvent::ExecutorFeePaid => "ExecutorFeePaid(address,uint256)",
-            LayerZeroEvent::PayloadVerified => "PayloadVerified(address,bytes,uint256,bytes32)",
+            LayerZeroEvent::PacketVerified => "PacketVerified((uint32,bytes32,uint64),address,bytes32)",
         }
     }
 }
