@@ -1,40 +1,46 @@
+use std::cell::Cell;
 use crate::abi::L0V2EndpointAbi::{Origin, PacketSent, PacketVerified};
-use crate::abi::SendLibraryAbi::ExecutorFeePaid;
+use crate::abi::SendLibraryAbi::{ExecutorFeePaid};
 use crate::chain::{connections, contracts, ContractInst, HttpProvider};
 use crate::config::DVNConfig;
 use alloy::dyn_abi::{DynSolValue, DynSolValue::CustomStruct};
 use alloy::network::Ethereum;
-use alloy::primitives::{keccak256, U256};
+use alloy::primitives::{keccak256, I256, U256};
 use alloy::providers::RootProvider;
 use alloy::pubsub::PubSubFrontend;
 use eyre::Result;
 use futures::StreamExt;
 use std::collections::VecDeque;
-use tokio::time;
+use tokio::time::{sleep, Duration};
 use tracing::{debug, error, warn};
 
 pub struct Executor {
     config: DVNConfig,
-    finish: bool,
+    finish: Cell<bool>,
 }
 
+// For test purposes
 pub enum ExecutorPacketStatusTracker {
     Initial,
     PacketSent,
     FeePaid,
     Verified,
-    // ...
+}
+
+pub enum ExecutionStatus {
+    NotExecutable,
+    Executable,
+    Executed,
 }
 
 impl Executor {
     pub fn new(config: DVNConfig) -> Self {
-        Executor { config, finish: false }
+        Executor { config, finish: Cell::new(false) }
     }
 
-    pub fn finish(&mut self) {
-        // Note for myself: we are in a single-threaded event loop,
-        // may not care about atomicity (yet).
-        self.finish = true
+    pub fn finish(&self) {
+        // Note for myself: we are in a single-threaded event loop, may not care about atomicity.
+        self.finish.set(true);
     }
 
     pub async fn listen(
@@ -49,18 +55,20 @@ impl Executor {
         let this_address = &self.config.public_key()?;
         let abi = connections::get_abi_from_path("Users/sasha/dev/near-sffl/workers/abi/EndpointV2View.json")?;
         // Create a contract instance.
-        let contract = contracts::create_contract_instance(&self.config, http_provider, abi)?;
+        let contract = contracts::create_contract_instance(&self.config, &http_provider, abi)?;
 
+        // Note: we expect to have a single element in this queue. Unfortunately, an author didn't
+        // find a good single object holder in Rust (AtomicPtr/RefCell are too complex to handle)
         let mut packet_sent_queue: VecDeque<PacketSent> = VecDeque::default();
 
         // TODO: tokio::spawn(async move ...) ?
-        while !&self.finish {
+        while !&self.finish.get() {
             tokio::select! {
                 Some(log) = ps_stream.next() => {
                     match log.log_decode::<PacketSent>() {
-                        Ok(packet_log) => {
+                        Ok(packet_sent) => {
                             debug!("PacketSent received");
-                            packet_sent_queue.push_back(packet_log.data().clone());
+                            packet_sent_queue.push_front(packet_sent.data().clone());
                         },
                         Err(e) => { error!("Failed to decode PacketSent event: {:?}", e);}
                     }
@@ -86,6 +94,9 @@ impl Executor {
                     match log.log_decode::<PacketVerified>() {
                         Ok(inner_log) => {
                             debug!("PacketVerified received");
+                            // Note: at the beginning executor may receive a couple of
+                            // `PacketVerified` messages, but they will not be processed
+                            // due to absence of previously received
                             let _ = Self::handle_verified_packet(
                                 &contract,
                                 &mut packet_sent_queue,
@@ -97,7 +108,7 @@ impl Executor {
                 },
                 else => {
                     debug!("Nothing to handle.");
-                    tokio::time::sleep(time::Duration::from_secs(3)).await;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                     continue;
                 }
             }
@@ -110,20 +121,60 @@ impl Executor {
         queue: &mut VecDeque<PacketSent>,
         packet_verified: &PacketVerified,
     ) -> Result<()> {
-        while let Some(packet) = queue.pop_back() {
-            let call_builder = contract.function(
-                "executable",
-                &[
-                    Executor::prepare_header(&packet_verified.origin),
-                    DynSolValue::Bytes(keccak256(packet.encodedPayload).to_vec()),
-                ],
-            )?;
+        if queue.is_empty() {
+            return Ok(());
+        }
+        let packet_sent = queue.pop_front().unwrap();
+        // We don't expect any item to be present. If we have any - it is garbage.
+        queue.clear();
+        let call_builder = contract.function(
+            "executable",
+            &[
+                Executor::prepare_header(&packet_verified.origin),
+                DynSolValue::Bytes(keccak256(packet_sent.encodedPayload).to_vec()),
+            ],
+        )?;
 
-            // TODO: offload to tokio::spawn with resubmission logic.
-            let call_result = call_builder.call().await;
-            warn!("Execution state: {:?}", call_result);
+        loop {
+            let call_result = call_builder.call().await?;
+            match call_result[0] {
+                DynSolValue::Int(I256::ZERO, 32) => {
+                    sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+                DynSolValue::Int(I256::ONE, 32) => {
+                    Self::lz_receive(contract, packet_verified).await?;
+                    break;
+                }
+                // We may ignore any Executed status, it just free the executor.
+                _ => break,
+            };
         }
         Ok(())
+    }
+
+    /// If the state is Executable, your Executor should decode the packet's options
+    /// using the options.ts package and call the Endpoint's lzReceive function with
+    /// the packet information:
+    /// endpoint.lzReceive(_origin, _receiver, _guid, _message, _extraData)
+    async fn lz_receive(
+        contract: &ContractInst,
+        packet_verified: &PacketVerified,
+    ) -> alloy::contract::Result<Vec<DynSolValue>> {
+        // endpoint.lzReceive(_origin, _receiver, _guid, _message, _extraData)
+        contract
+            .function(
+                "lzReceive",
+                &[
+                    Executor::prepare_header(&packet_verified.origin),
+                    DynSolValue::Address(packet_verified.receiver),
+                    // DynSolValue::FixedBytes(packet.guid, 32),
+                    // DynSolValue::Bytes(packet.message.to_vec()),
+                    DynSolValue::Bytes(vec![]),
+                ],
+            )?
+            .call()
+            .await
     }
 
     /// Converts `Origin` data structure from the received `PacketVerified`

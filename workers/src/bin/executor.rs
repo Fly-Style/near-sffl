@@ -4,7 +4,10 @@ use workers::chain::connections::build_executor_providers;
 use workers::config;
 use workers::executor_def::Executor;
 
-#[tokio::main]
+/// Executor is expected to work with low work rate, and we have a bonus
+/// from this observation - we don't need/want to care about concurrency control,
+/// so we choose run single-threaded runtime so far.
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> eyre::Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
@@ -14,7 +17,6 @@ async fn main() -> eyre::Result<()> {
             .from_env_lossy())
         .init();
 
-    // NOTE: saving it to constant reference to not get into the DCE.
     let config = config::DVNConfig::load_from_env()?;
     let (ws_provider, http_provider) = build_executor_providers(&config).await?;
     

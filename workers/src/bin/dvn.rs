@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
     //let sendlib_abi = get_abi_from_path("./abi/ArbitrumSendLibUln302.json")?;
     //let sendlib_contract = create_contract_instance(&config, http_provider.clone(), sendlib_abi)?;
     let receivelib_abi = get_abi_from_path("./abi/ArbitrumReceiveLibUln302.json")?;
-    let receivelib_contract = create_contract_instance(dvn_worker.config(), http_provider, receivelib_abi)?;
+    let receivelib_contract = create_contract_instance(dvn_worker.config(), &http_provider, receivelib_abi)?;
 
     info!("Listening to chain events...");
 
