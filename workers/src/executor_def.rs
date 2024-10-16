@@ -2,26 +2,28 @@ use crate::abi::L0V2EndpointAbi::{Origin, PacketSent, PacketVerified};
 use crate::abi::SendLibraryAbi::ExecutorFeePaid;
 use crate::chain::{connections, contracts, ContractInst, HttpProvider};
 use crate::config::DVNConfig;
+use alloy::contract::Error;
+use alloy::contract::Error::{PendingTransactionError, TransportError};
 use alloy::dyn_abi::{DynSolValue, DynSolValue::CustomStruct};
 use alloy::network::Ethereum;
-use alloy::primitives::bytes::{Buf, Bytes, BytesMut};
-use alloy::primitives::{keccak256, FixedBytes, I256, U256};
+use alloy::primitives::bytes::{Buf, BytesMut};
+use alloy::primitives::{FixedBytes, I256, U256};
 use alloy::providers::RootProvider;
 use alloy::pubsub::PubSubFrontend;
 use eyre::Result;
 use futures::StreamExt;
+use log::info;
 use std::cell::Cell;
 use std::collections::VecDeque;
-use log::info;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 pub struct Executor {
     config: DVNConfig,
     finish: Cell<bool>,
 }
 
-// For test purposes
+// Last touched tokio::select branch tracker, for test purposes.
 pub enum ExecutorPacketStatusTracker {
     Initial,
     PacketSent,
@@ -130,11 +132,11 @@ impl Executor {
             "executable",
             &[
                 Executor::prepare_header(&packet_verified.origin),
-                DynSolValue::Address(packet_verified.receiver)
-                // DynSolValue::Bytes(keccak256(packet_sent.encodedPayload).to_vec()),
+                DynSolValue::Address(packet_verified.receiver), // DynSolValue::Bytes(keccak256(packet_sent.encodedPayload).to_vec()),
             ],
         )?;
 
+        let raw_packet = packet_sent.encodedPayload.iter().as_slice();
         loop {
             let call_result = call_builder.call().await?;
             match call_result[0] {
@@ -145,7 +147,7 @@ impl Executor {
                 }
                 DynSolValue::Int(I256::ONE, 32) => {
                     // Executable
-                    Self::lz_receive(contract, packet_verified).await?;
+                    Self::lz_receive(contract, raw_packet, packet_verified).await?;
                     break;
                 }
                 // We may ignore Executed status, it just free the executor.
@@ -161,22 +163,30 @@ impl Executor {
     /// `endpoint.lzReceive(_origin, _receiver, _guid, _message, _extraData)`
     async fn lz_receive(
         contract: &ContractInst,
+        raw_packet_encoded: &[u8],
         packet_verified: &PacketVerified,
     ) -> alloy::contract::Result<Vec<DynSolValue>> {
         // endpoint.lzReceive(_origin, _receiver, _guid, _message, _extraData)
-        contract
-            .function(
-                "lzReceive",
-                &[
-                    Executor::prepare_header(&packet_verified.origin),
-                    DynSolValue::Address(packet_verified.receiver),
-                    // DynSolValue::FixedBytes(packet.guid, 32),
-                    // DynSolValue::Bytes(packet.message.to_vec()),
-                    DynSolValue::Bytes(vec![]),
-                ],
-            )?
-            .call()
-            .await
+        match Self::deserialize(raw_packet_encoded) {
+            Some((guid, message)) => {
+                contract
+                    .function(
+                        "lzReceive",
+                        &[
+                            Executor::prepare_header(&packet_verified.origin),
+                            DynSolValue::Address(packet_verified.receiver),
+                            DynSolValue::FixedBytes(guid, 32),
+                            DynSolValue::Bytes(message),
+                            DynSolValue::Bytes(vec![]), // TODO: no idea what is extra data for now...
+                        ],
+                    )?
+                    .call()
+                    .await
+            }
+            // Note: I didn't find any suitable error by type in alloy:Result.
+            // Sending back just empty vec for now.
+            None => Ok(vec![]),
+        }
     }
 
     /// Converts `Origin` data structure from the received `PacketVerified`
@@ -191,5 +201,56 @@ impl Executor {
                 DynSolValue::Uint(U256::from(origin.nonce), 64),
             ],
         }
+    }
+
+    /// Extract `guid` and `message` from raw encoded packet.
+    fn deserialize(raw_packet: &[u8]) -> Option<(FixedBytes<32>, Vec<u8>)> {
+        const MINIMUM_PACKET_LENGTH: usize = 93; // 1 + 8 + 4 + 32 + 4 + 32 + 32
+        if raw_packet.len() < MINIMUM_PACKET_LENGTH {
+            return None;
+        }
+        let mut buffered_packet = BytesMut::from(raw_packet);
+        buffered_packet.advance(1); // version
+        buffered_packet.get_u64(); // nonce
+        buffered_packet.get_u32(); // src_eid
+        buffered_packet.advance(32); // skip sender address, padded to 32 bytes.
+        buffered_packet.get_u32(); // dst_eid
+        buffered_packet.advance(32); // skip rcv address, padded to 32 bytes.
+        let guid: FixedBytes<32> = FixedBytes::from_slice(buffered_packet.split_to(32).freeze().iter().as_slice());
+        let message = buffered_packet.freeze().to_vec();
+
+        Some((guid, message))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::executor_def::Executor;
+    use alloy::primitives::FixedBytes;
+
+    #[test]
+    fn test_deserialize_happy_path() {
+        const MESSAGE_OFFSET: usize = 43; // Just for this input
+        const GUID_OFFSET: usize = MESSAGE_OFFSET + 32;
+        let raw_packet_vec: Vec<u8> = vec![
+            1, 0, 0, 0, 0, 0, 0, 17, 148, 0, 0, 117, 158, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25, 207, 206, 71, 237,
+            84, 168, 134, 20, 100, 141, 195, 241, 154, 89, 128, 9, 112, 7, 221, 0, 0, 118, 86, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 156, 45, 199, 55, 119, 23, 96, 62, 185, 43, 38, 85, 197, 242, 231, 153, 122, 73, 69, 189, 205,
+            50, 72, 156, 47, 106, 85, 252, 73, 42, 176, 56, 154, 105, 225, 195, 98, 35, 62, 174, 103, 79, 244, 166,
+            185, 78, 116, 114, 198, 247, 179, 202, 1, 0, 13, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 115, 135, 217, 64, 43,
+            109, 214, 128, 114, 89, 78, 125, 198, 218, 97, 243, 152, 229, 200, 67, 0, 0, 0, 0, 0, 0, 0, 10,
+        ];
+
+        let left_guid_bound = raw_packet_vec.len() - GUID_OFFSET;
+        let left_msg_bound = raw_packet_vec.len() - MESSAGE_OFFSET;
+
+        let expected_guid_arr: &[u8] = &raw_packet_vec.as_slice()[left_guid_bound..left_msg_bound];
+        let expected_message: &[u8] = &raw_packet_vec.as_slice()[left_msg_bound..];
+
+        let raw_packet = raw_packet_vec.as_slice();
+        let (guid, message) = Executor::deserialize(raw_packet).unwrap();
+        let expected_guid: FixedBytes<32> = FixedBytes::from_slice(expected_guid_arr);
+        assert_eq!(guid, expected_guid);
+        assert_eq!(message.as_slice(), expected_message);
     }
 }

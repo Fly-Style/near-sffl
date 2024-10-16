@@ -173,7 +173,7 @@ mod tests {
         let config = config::DVNConfig::load_from_env()?;
         let http_provider = get_http_provider(&config)?;
         let sendlib_abi = get_abi_from_path("./abi/ArbitrumSendLibUln302.json")?;
-        let sendlib_contract = create_contract_instance(&config, http_provider, sendlib_abi)?;
+        let sendlib_contract = create_contract_instance(&config, &http_provider, sendlib_abi)?;
 
         // Query contract value
         let required_confirmations = query_confirmations(&sendlib_contract, U256::from(30110)).await?;
@@ -191,7 +191,7 @@ mod tests {
         let config = config::DVNConfig::load_from_env()?;
         let http_provider = get_http_provider(&config)?;
         let receivelib_abi = get_abi_from_path("./abi/ArbitrumReceiveLibUln302.json")?;
-        let receivelib_contract = create_contract_instance(&config, http_provider, receivelib_abi)?;
+        let receivelib_contract = create_contract_instance(&config, &http_provider, receivelib_abi)?;
 
         // Query contract value
         let uln302 = query_already_verified(
