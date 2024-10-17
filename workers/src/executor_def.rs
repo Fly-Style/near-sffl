@@ -23,14 +23,6 @@ pub struct Executor {
     finish: Cell<bool>,
 }
 
-// Last touched tokio::select branch tracker, for test purposes.
-pub enum ExecutorPacketStatusTracker {
-    Initial,
-    PacketSent,
-    FeePaid,
-    Verified,
-}
-
 impl Executor {
     pub fn new(config: DVNConfig) -> Self {
         Executor {
@@ -128,11 +120,14 @@ impl Executor {
         let packet_sent = queue.pop_front().unwrap();
         // We don't expect any item to be present. If we have any - it is garbage.
         queue.clear();
+        // Despite being described with other arguments, the only real implementation in
+        // the contract of the `executable` function located here: https://shorturl.at/4H6Yz
+        // function executable(Origin memory _origin, address _receiver) returns (ExecutionState)
         let call_builder = contract.function(
             "executable",
             &[
-                Executor::prepare_header(&packet_verified.origin),
-                DynSolValue::Address(packet_verified.receiver), // DynSolValue::Bytes(keccak256(packet_sent.encodedPayload).to_vec()),
+                Executor::prepare_header(&packet_verified.origin), // Origin (selected header fields)
+                DynSolValue::Address(packet_verified.receiver),    // receiver address
             ],
         )?;
 
@@ -141,16 +136,16 @@ impl Executor {
             let call_result = call_builder.call().await?;
             match call_result[0] {
                 DynSolValue::Int(I256::ZERO, 32) => {
-                    // NotExecutable, continue to await commits
+                    // state: NotExecutable, continue to await commits
                     sleep(Duration::from_millis(500)).await;
                     continue;
                 }
                 DynSolValue::Int(I256::ONE, 32) => {
-                    // Executable
+                    // state: Executable, firing lz_receive
                     Self::lz_receive(contract, raw_packet, packet_verified).await?;
                     break;
                 }
-                // We may ignore Executed status, it just free the executor.
+                // We may ignore Executed status, it just frees the executor.
                 _ => break,
             };
         }
@@ -204,6 +199,8 @@ impl Executor {
     }
 
     /// Extract `guid` and `message` from raw encoded packet.
+    /// Note: this code is temporal and may be replaced with
+    /// library-generated code in the future.
     fn deserialize(raw_packet: &[u8]) -> Option<(FixedBytes<32>, Vec<u8>)> {
         const MINIMUM_PACKET_LENGTH: usize = 93; // 1 + 8 + 4 + 32 + 4 + 32 + 32
         if raw_packet.len() < MINIMUM_PACKET_LENGTH {
