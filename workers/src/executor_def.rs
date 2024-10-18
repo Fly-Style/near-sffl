@@ -54,7 +54,7 @@ impl Executor {
         // find a good single object holder in Rust (AtomicPtr/RefCell are too complex to handle)
         let mut packet_sent_queue: VecDeque<PacketSent> = VecDeque::default();
 
-        // TODO: tokio::spawn(async move ...) ?
+        // TODO: tokio::spawn(async ...) ?
         while !&self.finish.get() {
             tokio::select! {
                 Some(log) = ps_stream.next() => {
@@ -90,11 +90,11 @@ impl Executor {
                             // Note: at the beginning executor may receive a couple of
                             // `PacketVerified` messages, but they will not be processed
                             // due to absence of previously received
-                            let _ = Self::handle_verified_packet(
+                            Self::handle_verified_packet(
                                 &contract,
                                 &mut packet_sent_queue,
                                 inner_log.data()
-                            ).await;
+                            ).await?;
                         },
                         Err(e) => { error!("Failed to decode PacketVerified event: {:?}", e);}
                     }
@@ -117,6 +117,7 @@ impl Executor {
         if queue.is_empty() {
             return Ok(());
         }
+        
         let packet_sent = queue.pop_front().unwrap();
         // We don't expect any item to be present. If we have any - it is garbage.
         queue.clear();
@@ -131,7 +132,7 @@ impl Executor {
             ],
         )?;
 
-        let raw_packet = packet_sent.encodedPayload.iter().as_slice();
+        let raw_packet = &packet_sent.encodedPayload[..];
         loop {
             let call_result = call_builder.call().await?;
             match call_result[0] {
@@ -198,9 +199,8 @@ impl Executor {
         }
     }
 
+    // TODO: this code is temporal and may be replaced with library-generated code in the future.
     /// Extract `guid` and `message` from raw encoded packet.
-    /// Note: this code is temporal and may be replaced with
-    /// library-generated code in the future.
     fn deserialize(raw_packet: &[u8]) -> Option<(FixedBytes<32>, Vec<u8>)> {
         const MINIMUM_PACKET_LENGTH: usize = 93; // 1 + 8 + 4 + 32 + 4 + 32 + 32
         if raw_packet.len() < MINIMUM_PACKET_LENGTH {
@@ -213,7 +213,7 @@ impl Executor {
         buffered_packet.advance(32); // skip sender address, padded to 32 bytes.
         buffered_packet.get_u32(); // dst_eid
         buffered_packet.advance(32); // skip rcv address, padded to 32 bytes.
-        let guid: FixedBytes<32> = FixedBytes::from_slice(buffered_packet.split_to(32).freeze().iter().as_slice());
+        let guid: FixedBytes<32> = FixedBytes::from_slice(&buffered_packet.split_to(32).freeze()[..]);
         let message = buffered_packet.freeze().to_vec();
 
         Some((guid, message))
@@ -249,5 +249,11 @@ mod test {
         let expected_guid: FixedBytes<32> = FixedBytes::from_slice(expected_guid_arr);
         assert_eq!(guid, expected_guid);
         assert_eq!(message.as_slice(), expected_message);
+    }    
+    
+    #[test]
+    fn test_deserialize_fail() {
+        let raw_packet_vec: Vec<u8> = vec![1, 0, 0, 0, 0, 0, 0, 17];
+        assert_eq!(Executor::deserialize(raw_packet_vec.as_slice()), None);
     }
 }
